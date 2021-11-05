@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/viper"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
@@ -24,6 +25,14 @@ func main() {
 	}
 
 	address := fmt.Sprintf("%s:%s", viper.GetString("host"), viper.GetString("port"))
+
+	// Update currencies quotes every 6 hours
+	go func() {
+		UpdateCurrencyJson()
+		for range time.Tick(time.Hour * 6) {
+			UpdateCurrencyJson()
+		}
+	}()
 
 	// Initialize database
 	postgres, err := NewPostgresDB(Config{
@@ -203,9 +212,11 @@ func main() {
 		if err := c.Bind(s); err != nil {
 			return c.NoContent(http.StatusBadRequest)
 		}
-		if err = c.Validate(s); err != nil {
+		if err := c.Validate(s); err != nil {
 			return err
 		}
+
+		currency := c.QueryParam("currency")
 
 		ex, err := db.IsUserExist(s.UserId)
 		if err != nil {
@@ -224,7 +235,15 @@ func main() {
 			return err
 		}
 
-		return c.JSON(http.StatusOK, user.Balance)
+		if currency == "" {
+			return c.JSON(http.StatusOK, user.Balance)
+		} else {
+			if tt, err := ConvertFromRubTo(currency, user.Balance); err != nil {
+				return err
+			} else {
+				return c.JSON(http.StatusOK, tt)
+			}
+		}
 	})
 
 	// Start server
